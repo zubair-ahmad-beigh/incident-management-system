@@ -1,0 +1,134 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: incident-management-system
+
+  # MySQL (R2DBC - reactive, non-blocking)
+  r2dbc:
+    url: r2dbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DB:imsdb}
+    username: ${MYSQL_USER:imsuser}
+    password: ${MYSQL_PASSWORD:imspassword}
+    properties:
+      sslMode: disabled
+    pool:
+      initial-size: 5
+      max-size: 20
+      max-idle-time: 30m
+
+  # MySQL (JDBC - for Flyway migrations only, not used at runtime)
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DB:imsdb}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    username: ${MYSQL_USER:imsuser}
+    password: ${MYSQL_PASSWORD:imspassword}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  # Flyway migrations (disabled - tables applied directly to Docker MySQL)
+  flyway:
+    enabled: false
+
+  # MongoDB (reactive)
+  data:
+    mongodb:
+      uri: mongodb://${MONGO_HOST:localhost}:${MONGO_PORT:27017}/${MONGO_DB:imsdb}
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 16
+          max-idle: 8
+          min-idle: 2
+
+  # Kafka
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 3
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 1
+        linger.ms: 5
+        batch.size: 65536
+        buffer.memory: 67108864
+    consumer:
+      group-id: ims-signal-consumers
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "com.ims.backend.dto"
+        spring.json.type.mapping: "signal:com.ims.backend.dto.SignalEvent"
+        max.poll.records: 500
+        fetch.min.bytes: 1
+        fetch.max.wait.ms: 500
+
+# Kafka topic config
+ims:
+  kafka:
+    topics:
+      signals: ims.signals
+      incidents: ims.incidents
+  debounce:
+    window-seconds: 10
+  rate-limit:
+    signals-per-second: 10000
+    burst-capacity: 20000
+  cache:
+    incident-ttl-minutes: 60
+
+# Actuator
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,prometheus,info
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+# Resilience4j
+resilience4j:
+  circuitbreaker:
+    instances:
+      mysqlDB:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+      mongoDB:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+      redisCache:
+        sliding-window-size: 5
+        failure-rate-threshold: 60
+        wait-duration-in-open-state: 10s
+  retry:
+    instances:
+      mysqlDB:
+        max-attempts: 3
+        wait-duration: 500ms
+        retry-exceptions:
+          - org.springframework.dao.TransientDataAccessException
+      mongoDB:
+        max-attempts: 3
+        wait-duration: 500ms
+
+# Logging
+logging:
+  level:
+    com.ims.backend: DEBUG
+    org.springframework.r2dbc: INFO
+    org.apache.kafka: WARN
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
