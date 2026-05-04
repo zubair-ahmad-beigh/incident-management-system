@@ -302,5 +302,3 @@ Request → Rate Limiter → Kafka (non-blocking)
 - **Fallback**: Redis-only read on MySQL circuit open  
 
 ---
-
-*Built as a senior-engineer reference implementation of PagerDuty-style IMS.*
